@@ -1,0 +1,241 @@
+// chickenDoor04 derived from Servo03
+// open and close door by ServoA 
+// initial state = doorOpen = HIGH;  {TRUE}
+// triggered by light sensor + manual override buttons 
+// son of SwitchLight
+#include <Servo.h>
+#include <SoftwareSerial.h>
+
+// critical min and max light values 
+int lightAtDusk = 160; 
+int lightAtDawn = 110; 
+#define PERSIST_REPS  30     // persistence: loop count 
+#define MSEC_PERSIST  10000  // persistence: delay time between samples  
+
+// door operation values 
+#define RUN_TIME_MANUAL  1500
+#define RUN_TIME_FORWARD_OPEN   12900
+#define RUN_TIME_REVERSE_CLOSE  12000
+const int FORWARD = 0;  // servo direction code - Forward 
+const int REVERSE = 179;  // servo direction code - Reverse 
+
+// I/O PIN CONSTANTS
+const int LIGHT_SENSOR_PIN = 0;  // analog
+const int SERVO_PIN = 9;  // servo control pin = digital PWM
+// servo Control White/Orange/Yellow
+// servo Power  Red
+// servo GND    Black/Brown
+
+const int RED_LED_PIN = 4; // 7
+const int SW01 = 3;
+const int GRN_LED_PIN = 8;
+const int SW02 = 2;
+const int BUZZ_PIN = 10;
+const int N_STATES = 40;  // number of pins to watch 
+long int loopCount = 0;
+boolean doorOpen = LOW;
+  
+/*
+Exploring Arduino - Code Listing 2-5: Debounced Button Toggling
+http://www.exploringarduino.com/content/ch2
+
+Copyright 2013 Jeremy Blum ( http://www.jeremyblum.com )
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License v3 as published by
+the Free Software Foundation.
+*/
+
+//const int LED=2;             //The LED is connected to pin 9
+//const int BUTTON=3;          //The Button is connected to pin 2
+// boolean prevSwitch01 = LOW;    //Variable containing the previous button state
+// boolean currSwitch01 = LOW;    //Variable containing the current button state
+boolean prevButtonState[N_STATES]; 
+boolean currButtonState[N_STATES]; 
+boolean ledState[N_STATES];       //The present state of the LED (on/off)
+
+Servo servoA;
+
+void printIntStr( int x, String s ) {
+  Serial.print( x );
+  Serial.println( " " + s );
+}
+
+void printIntStr2( long x, String sx, int y, String sy  ) {
+  Serial.print( x );    Serial.print( " " + sx + "; " );
+  Serial.print( y );    Serial.println( " " + sy );
+}
+
+void printIntStr4( int a, String sa, int b, String sb, int c, String sc, int d, String sd  ) {
+  Serial.print( a );    Serial.print( " " + sa + "; " );
+  Serial.print( b );    Serial.print( " " + sb + "; " );
+  Serial.print( c );    Serial.print( " " + sc + "; " );
+  Serial.print( d );    Serial.println( " " + sd );
+}
+
+void setup()
+{
+  Serial.begin(9600);
+  servoA.attach(SERVO_PIN);
+  loopCount=0;
+  if( lightAbove( lightAtDawn ) ) {
+    doorOpen = HIGH;
+  } else { 
+    // if( lightBelow( lightAtDusk ) ) {
+    doorOpen = LOW;
+  }
+  pinMode(RED_LED_PIN, OUTPUT);    //Set the LED pin as an output
+  pinMode(GRN_LED_PIN, OUTPUT);
+  for( int i=0; i < N_STATES; i++ ) {
+      prevButtonState[i] = LOW;
+      currButtonState[i] = LOW;
+      ledState[i] = LOW;
+  }
+  ledState[RED_LED_PIN] = LOW;
+  ledState[GRN_LED_PIN] = LOW;
+//  moveGate( FORWARD, 3000 );  // calibrate
+}
+
+/*
+* Debouncing Function
+* Pass it the previous button state,
+* and get back the current debounced button state.
+*/
+boolean debounce(boolean last, int button)
+{
+  boolean current = digitalRead(button);       //Read the button state
+  if (last != current)                         //if it's different…
+  {
+    delay(5);                                  //wait 5ms
+    current = digitalRead(button);             //read it again
+  }
+//  printIntStr((int)current, " current in debounce");
+  return current;                              //return the current value
+}
+
+void toggleLight(int btn, int led)
+{
+  currButtonState[btn] = debounce(prevButtonState[btn], btn);        //read debounced state
+  if( prevButtonState[btn] == LOW && currButtonState[btn] == HIGH) {   //if it was pressed…
+    ledState[led] = !ledState[led];    //toggle the LED value
+    printIntStr2(btn, "btn ", led, "toggle LED");
+  }
+  prevButtonState[btn] = currButtonState[btn];           //reset button value
+  digitalWrite(led, ledState[led]);                      //change the LED state
+  delay(10);
+}
+
+boolean lightBelow( int dusk ) {
+  int lightSense = analogRead( LIGHT_SENSOR_PIN );         // read Light Sensor
+  printIntStr2( lightSense, "=lightSense; wait for", dusk, "dusk" ); 
+  if( lightSense < dusk ) {
+    digitalWrite( GRN_LED_PIN, LOW ); // ensure Green OFF
+    blinkLED(RED_LED_PIN, 5);
+    return HIGH;
+  } else return LOW;
+}
+boolean lightAbove( int dawn ) {
+  int lightSense = analogRead( LIGHT_SENSOR_PIN );         // read Light Sensor
+  printIntStr2( lightSense, "=lightSense wait for", dawn, "dawn" ); 
+  if( lightSense > dawn ) {
+    blinkLED(GRN_LED_PIN, 5);
+    return HIGH;
+  } else return LOW;
+}
+
+boolean lightPersistsBelow( int limit ) {
+  if( lightBelow( limit )) { 
+    for( int i=0; i < PERSIST_REPS; i++ ) { 
+      printIntStr4( i, "=index", limit, "=lightLimit", 
+        MSEC_PERSIST, "=persist", PERSIST_REPS, "=repeat." );
+      delay( MSEC_PERSIST ); 
+      if( !lightBelow( limit ) ) { return LOW; }
+    }
+    return( HIGH );  // persistent
+  } 
+  else return( LOW );
+}
+boolean lightPersistsAbove( int limit ) {
+  if( lightAbove( limit )) { 
+    for( int i=0; i < PERSIST_REPS; i++ ) { 
+      printIntStr4( i, "=index", limit, "=lightLimit", 
+        MSEC_PERSIST, "=persist", PERSIST_REPS, "=repeat." );
+      delay( MSEC_PERSIST ); 
+      if( !lightAbove( limit ) ) { return LOW; }
+    }
+    return( HIGH );  // persistent
+  } 
+  else return( LOW );
+}
+
+void moveGate( int direction, int runTime ) {
+    servoA.attach( SERVO_PIN );
+    servoA.write( direction );  // forward ==> up to open 
+    if( direction == FORWARD ) {
+        printIntStr2( runTime, "opening gate", direction, "=direction" );
+        delay( runTime );
+    } else {
+      printIntStr2( runTime, "closing gate", direction, "=direction" );
+      delay( runTime );
+    }
+    servoA.detach();
+    delay(1000);  // no YoYo
+}
+
+void blinkLED(int pin, int rep) {
+    for( int i=0; i < rep; i++ ) {
+      digitalWrite( pin, HIGH );
+      delay( 500 );
+      digitalWrite( pin, LOW );
+      delay( 500 );
+    }
+}
+  
+const int MANUAL_CLOSE = 1;
+const int MANUAL_OPEN = 2;
+
+int manualOverride() {
+  toggleLight(SW01, RED_LED_PIN);
+  toggleLight(SW02, GRN_LED_PIN);
+  if( ledState[RED_LED_PIN] ) {  // manual Close 
+    printIntStr( (int) ledState[RED_LED_PIN], " state of red LED" );
+    ledState[RED_LED_PIN] = LOW;
+    lightAtDusk = 0;
+    lightAtDawn = 1023;
+    moveGate( FORWARD, RUN_TIME_MANUAL );
+    doorOpen = HIGH;
+    return MANUAL_OPEN;
+  }
+  if( ledState[GRN_LED_PIN] ) {  // manual Open
+    printIntStr( (int) ledState[GRN_LED_PIN], " state of green LED" );  
+    ledState[GRN_LED_PIN] = LOW;
+    lightAtDusk = 0;
+    lightAtDawn = 1023;
+    moveGate( REVERSE, RUN_TIME_MANUAL );
+    doorOpen = LOW;
+    return MANUAL_CLOSE;
+  }
+  return 0;
+}
+
+void loop() {
+  int overRide = manualOverride();
+  if( overRide > 0 ) {
+    printIntStr2( (int) doorOpen, "doorOpen", overRide, "OVERRIDE TRUE" );
+  } 
+  else 
+  if( doorOpen && lightPersistsBelow( lightAtDusk ) ) {
+    moveGate( REVERSE, RUN_TIME_REVERSE_CLOSE ); 
+    doorOpen = LOW;
+    delay(600000);  // 10 min - no yoyo
+  } else if( !doorOpen && lightPersistsAbove( lightAtDawn ) ) {
+    moveGate( FORWARD, RUN_TIME_FORWARD_OPEN );
+    blinkLED(GRN_LED_PIN, 2);
+    doorOpen = HIGH;
+    digitalWrite( GRN_LED_PIN, HIGH );
+    delay(3600000);  // 1 hour    
+    digitalWrite( GRN_LED_PIN, LOW );
+  }
+  if( ++loopCount >= 32767 ) { loopCount=0; }
+  printIntStr2( loopCount, " loopCount; state", (int) doorOpen, "doorOpen T/F" );
+  delay(1000);
+}
